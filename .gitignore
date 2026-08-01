@@ -1,0 +1,20 @@
+# Helper
+.asst/
+.claude/
+.devcontainer/
+AGENTS.md
+
+# Vim
+*.swo
+*.swp
+*.un~
+*~
+
+# Build output
+*.deb
+*.tar.gz
+build/
+
+# Windows
+desktop.ini
+Thumbs.db
