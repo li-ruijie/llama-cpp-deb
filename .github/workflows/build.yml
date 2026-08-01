@@ -1,0 +1,121 @@
+name: Build llama.cpp packages
+
+on:
+  schedule:
+    - cron: '0 21 * * 0'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Upstream tag override, for example b10216. Empty means latest."
+        required: false
+        type: string
+      force:
+        description: "Rebuild even when the deployed version already matches"
+        required: false
+        default: false
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: build
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      skip: ${{ steps.resolve.outputs.skip }}
+    steps:
+      - name: Resolve the upstream tag and decide whether to build
+        id: resolve
+        env:
+          VERSION_OVERRIDE: ${{ inputs.version }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -o pipefail
+          if [ -n "$VERSION_OVERRIDE" ]; then
+            TAG="$VERSION_OVERRIDE"
+          else
+            TAG=$(curl -fsSL https://api.github.com/repos/ggml-org/llama.cpp/releases/latest \
+              | jq -r '.tag_name')
+          fi
+
+          # Debian versions must begin with a digit, and upstream tags are b<N>.
+          VERSION="0.0.${TAG#b}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          DEPLOYED=$(curl -fsSL \
+            https://li-ruijie.github.io/apt/dists/stable/dynamic/binary-amd64/Packages 2>/dev/null \
+            | awk '/^Package: llama-cpp$/,/^$/' | grep '^Version:' | awk '{print $2}' || true)
+
+          if [ "$VERSION" = "$DEPLOYED" ] && [ "$FORCE" != "true" ]; then
+            echo "Version $VERSION already deployed, skipping"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ "$VERSION" = "$DEPLOYED" ]; then
+            echo "Rebuilding $VERSION (forced)"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New version $VERSION (deployed: ${DEPLOYED:-none})"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish:
+    needs: check
+    if: needs.check.outputs.skip == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Build the base packages
+        env:
+          TAG: ${{ needs.check.outputs.tag }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          mkdir -p dist
+          for pair in x64:amd64 arm64:arm64; do
+            upstream="${pair%%:*}"
+            debarch="${pair##*:}"
+            archive="llama-${TAG}-bin-ubuntu-${upstream}.tar.gz"
+            curl -fsSL -o "$archive" \
+              "https://github.com/ggml-org/llama.cpp/releases/download/${TAG}/${archive}"
+            scripts/package-base.sh "$archive" "$VERSION" "$debarch" dist
+          done
+          ls -la dist
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.check.outputs.tag }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          # A forced rebuild reuses the upstream tag, and gh refuses to create a
+          # release that already exists, so replace it rather than failing.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Replacing the existing release for $TAG"
+            gh release delete "$TAG" --yes --cleanup-tag
+          fi
+          gh release create "$TAG" dist/*.deb \
+            --title "llama.cpp $TAG" \
+            --notes "Debian packages built from ggml-org/llama.cpp $TAG (version $VERSION)."
+
+      - name: Dispatch to the APT repository
+        env:
+          GH_TOKEN: ${{ secrets.APT_DISPATCH_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.check.outputs.tag }}
+        run: |
+          base="https://github.com/${REPO}/releases/download/${TAG}"
+          urls=$(for f in dist/*.deb; do printf '"%s/%s",' "$base" "$(basename "$f")"; done)
+          gh api repos/li-ruijie/apt/dispatches -X POST --input - <<EOF
+          {
+            "event_type": "add-debs",
+            "client_payload": { "debs": [ ${urls%,} ] }
+          }
+          EOF
