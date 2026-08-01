@@ -31,9 +31,12 @@ assert_equals() {  # assert_equals <label> <actual> <expected>
 # A stub standing in for the compiled backend.
 printf 'not a real library' > "$work/libggml-cuda.so"
 
-"$here/../package-cuda.sh" "$work/libggml-cuda.so" "$version" "$work"
+# Capture stdout. The script's documented contract is that it prints the path it
+# wrote, so asserting it here verifies that contract and keeps the stray path
+# line out of the test output.
+deb=$("$here/../package-cuda.sh" "$work/libggml-cuda.so" "$version" "$work")
 
-deb="$work/llama-cpp-cuda_${version}_amd64.deb"
+assert_equals "prints the path it wrote" "$deb" "$work/llama-cpp-cuda_${version}_amd64.deb"
 [ -f "$deb" ] || { echo "FAIL  package-cuda.sh produced no .deb at $deb"; exit 1; }
 
 control=$(dpkg-deb -f "$deb")

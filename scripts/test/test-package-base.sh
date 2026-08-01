@@ -32,9 +32,12 @@ assert_equals() {  # assert_equals <label> <actual> <expected>
 curl -fsSL -o "$work/base.tar.gz" \
     "https://github.com/ggml-org/llama.cpp/releases/download/${tag}/llama-${tag}-bin-ubuntu-x64.tar.gz"
 
-"$here/../package-base.sh" "$work/base.tar.gz" "$version" amd64 "$work"
+# Capture stdout. The script's documented contract is that it prints the path it
+# wrote, so asserting it here verifies that contract and keeps the stray path
+# line out of the test output.
+deb=$("$here/../package-base.sh" "$work/base.tar.gz" "$version" amd64 "$work")
 
-deb="$work/llama-cpp_${version}_amd64.deb"
+assert_equals "prints the path it wrote" "$deb" "$work/llama-cpp_${version}_amd64.deb"
 [ -f "$deb" ] || { echo "FAIL  package-base.sh produced no .deb at $deb"; exit 1; }
 
 control=$(dpkg-deb -f "$deb")
