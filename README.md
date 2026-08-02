@@ -21,17 +21,22 @@ Everything installs under `/usr/lib/llama.cpp/`, with tools reached through syml
 `llama-cpp-cuda` depends on the CUDA runtime, so apt installs it automatically:
 
 ```
-Depends: llama-cpp (= <version>), cuda-libraries-13-3
+Depends: llama-cpp (= <version>), cuda-cudart-13-3, libcublas-13-3
 ```
 
 The suffix tracks whichever toolkit the backend was compiled against, derived from `nvcc`
 at build time, so a container bump moves the dependency with it.
 
-The dependency is the `cuda-libraries` metapackage rather than the two libraries the
-backend links today, `libcudart` and `libcublas`. That costs about 1.2 GB of libraries
-that go unused, and buys immunity to a whole class of silent failure: if a future
-llama.cpp links cuFFT or cuSOLVER, a pinned pair would miss it and the backend would fail
-to load with no explanation. That is exactly how the NCCL problem behaved.
+These are the exact two runtime packages the backend links. NVIDIA's `cuda-libraries`
+metapackage would also work and would need no maintenance, but it pulls 13 packages and
+about 1.2 GB, of which llama.cpp uses two. The pin is kept honest by
+`scripts/check-backend-deps.sh`, which reads the compiled backend's `DT_NEEDED` entries
+and fails the build if any CUDA library outside the declared set appears.
+
+That check matters because nothing else would catch the drift. Every CUDA library is
+present in the build container, so a newly linked one resolves there and the smoke test
+stays green. It would surface only on a user's machine, as a backend that fails to load
+and a silent fall back to CPU. That is precisely what the NCCL link caused once already.
 
 The bare `cuda` metapackage is deliberately avoided, since it depends on `nvidia-open` and
 would pull a competing driver onto a machine using a distribution-packaged one.
@@ -62,6 +67,7 @@ The workflow runs weekly and can be dispatched manually with a `version` overrid
 ```sh
 scripts/package-base.sh <tarball> <version> <arch> <outdir>
 scripts/package-cuda.sh <libggml-cuda.so> <version> <cuda-suffix> <outdir>
+scripts/check-backend-deps.sh <libggml-cuda.so | ->
 scripts/smoke-test.sh <base.deb> [cuda.deb]
 ```
 

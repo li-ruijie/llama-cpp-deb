@@ -41,7 +41,7 @@ Version: ${version}
 Architecture: amd64
 Maintainer: li-ruijie <1547237+li-ruijie@users.noreply.github.com>
 Homepage: https://github.com/ggml-org/llama.cpp
-Depends: llama-cpp (= ${version}), cuda-libraries-${cuda_suffix}
+Depends: llama-cpp (= ${version}), cuda-cudart-${cuda_suffix}, libcublas-${cuda_suffix}
 Section: misc
 Priority: optional
 Description: llama.cpp, CUDA backend
@@ -49,12 +49,16 @@ Description: llama.cpp, CUDA backend
  and 12.0 with PTX fallback from 9.0.
  .
  The CUDA runtime is depended on rather than bundled, since cuBLAS alone is
- an 818 MB archive. The dependency is the cuda-libraries metapackage rather
- than the two libraries the backend links today, so that a future llama.cpp
- linking another CUDA library does not fail silently. It comes from NVIDIA's
- own CUDA apt repository, which must be configured on the target machine.
- Debian's nvidia-cuda-toolkit is 12.4 and is both too old for compute
- capability 12.0 and the wrong soname for a CUDA 13 build.
+ an 818 MB archive. Exactly the two runtime packages the backend links are
+ named, rather than NVIDIA's cuda-libraries metapackage, which would add
+ 1.2 GB of libraries that go unused. check-backend-deps.sh fails the build
+ if the backend ever links a CUDA library outside that set, so the pin
+ cannot drift out of step with the linkage.
+ .
+ Both come from NVIDIA's own CUDA apt repository, which must be configured
+ on the target machine. Debian's nvidia-cuda-toolkit is 12.4 and is both
+ too old for compute capability 12.0 and the wrong soname for a CUDA 13
+ build.
  .
  The NVIDIA driver is deliberately not depended on. The cuda metapackage
  would pull nvidia-open, which collides with a distribution-packaged driver,

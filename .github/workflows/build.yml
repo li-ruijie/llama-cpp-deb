@@ -173,6 +173,15 @@ jobs:
           echo "path=$PWD/$so" >> "$GITHUB_OUTPUT"
           df -h /
 
+      # The package pins the exact CUDA runtime packages it links rather than
+      # NVIDIA's 1.2 GB metapackage. Nothing downstream would notice that pin
+      # going stale: every CUDA library is present in this container, so a newly
+      # linked one resolves here and the smoke test stays green. It would surface
+      # only on a user's machine as a silent CPU fallback, which is what the NCCL
+      # link already caused once. So fail here instead.
+      - name: Check the backend links only declared CUDA libraries
+        run: scripts/check-backend-deps.sh "${{ steps.backend.outputs.path }}"
+
       - name: Build the packages
         env:
           TAG: ${{ needs.check.outputs.tag }}
