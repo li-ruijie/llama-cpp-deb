@@ -45,8 +45,6 @@ contents=$(dpkg-deb -c "$deb")
 assert_contains "package name"   "$control" "Package: llama-cpp-cuda"
 assert_contains "version"        "$control" "Version: 0.0.10216"
 assert_contains "architecture"   "$control" "Architecture: amd64"
-assert_contains "versioned dependency on the base package" \
-    "$control" "Depends: llama-cpp (= 0.0.10216)"
 assert_contains "backend lands beside the base payload" \
     "$contents" "./usr/lib/llama.cpp/libggml-cuda.so"
 assert_contains "root ownership" "$contents" "root/root"
@@ -54,6 +52,13 @@ assert_contains "root ownership" "$contents" "root/root"
 # The design turns on declaring no CUDA dependency, so guard that explicitly.
 # Check the Depends line alone, since the Description legitimately names cuBLAS.
 depends=$(printf '%s\n' "$control" | grep '^Depends:' || true)
+
+# Equality, not containment: "and nothing else" is the requirement, so an
+# appended non-CUDA dependency must fail even though the keyword scan below
+# would not catch it.
+assert_equals "Depends is exactly the version-pinned base package" \
+    "$depends" "Depends: llama-cpp (= ${version})"
+
 for forbidden in cublas cudart nvidia; do
     assert_equals "Depends names no $forbidden" \
         "$(printf '%s\n' "$depends" | grep -ci "$forbidden" || true)" "0"
