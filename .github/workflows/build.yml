@@ -34,13 +34,15 @@ jobs:
         env:
           VERSION_OVERRIDE: ${{ inputs.version }}
           FORCE: ${{ inputs.force }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -o pipefail
           if [ -n "$VERSION_OVERRIDE" ]; then
             TAG="$VERSION_OVERRIDE"
           else
-            TAG=$(curl -fsSL https://api.github.com/repos/ggml-org/llama.cpp/releases/latest \
-              | jq -r '.tag_name')
+            # Authenticated, because the anonymous API allows 60 requests an hour
+            # per IP and runners share addresses, which returns 403 in practice.
+            TAG=$(gh api repos/ggml-org/llama.cpp/releases/latest --jq '.tag_name')
           fi
 
           # Debian versions must begin with a digit, and upstream tags are b<N>.
