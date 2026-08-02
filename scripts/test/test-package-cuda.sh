@@ -56,18 +56,19 @@ assert_contains "root ownership" "$contents" "root/root"
 depends=$(printf '%s\n' "$control" | grep '^Depends:' || true)
 assert_equals "Depends pins the base package and the matching CUDA runtime" \
     "$depends" \
-    "Depends: llama-cpp (= ${version}), cuda-cudart-${cuda_suffix}, libcublas-${cuda_suffix}"
+    "Depends: llama-cpp (= ${version}), cuda-libraries-${cuda_suffix}"
 
 # The suffix must be threaded through, not hardcoded, or a container bump would
 # silently keep depending on the old CUDA release.
 mkdir -p "$work/other"
 other=$("$here/../package-cuda.sh" "$work/libggml-cuda.so" "$version" 14-1 "$work/other")
 assert_contains "the CUDA suffix is threaded through, not hardcoded" \
-    "$(dpkg-deb -f "$other" Depends)" "cuda-cudart-14-1, libcublas-14-1"
+    "$(dpkg-deb -f "$other" Depends)" "cuda-libraries-14-1"
 
-# The driver is deliberately absent, since its package name varies by distro.
-assert_equals "Depends names no driver package" \
-    "$(printf '%s\n' "$depends" | grep -ci "nvidia-driver\|libcuda1" || true)" "0"
+# The bare "cuda" metapackage depends on nvidia-open, which collides with a
+# distribution-packaged driver, so it must never appear.
+assert_equals "Depends does not pull the cuda metapackage or a driver" \
+    "$(printf '%s\n' "$depends" | grep -cE '(^|, )cuda(,|$)|nvidia-open|nvidia-driver|libcuda1' || true)" "0"
 
 # A malformed suffix must be rejected rather than producing a broken dependency.
 status=0

@@ -21,11 +21,20 @@ Everything installs under `/usr/lib/llama.cpp/`, with tools reached through syml
 `llama-cpp-cuda` depends on the CUDA runtime, so apt installs it automatically:
 
 ```
-Depends: llama-cpp (= <version>), cuda-cudart-13-3, libcublas-13-3
+Depends: llama-cpp (= <version>), cuda-libraries-13-3
 ```
 
 The suffix tracks whichever toolkit the backend was compiled against, derived from `nvcc`
 at build time, so a container bump moves the dependency with it.
+
+The dependency is the `cuda-libraries` metapackage rather than the two libraries the
+backend links today, `libcudart` and `libcublas`. That costs about 1.2 GB of libraries
+that go unused, and buys immunity to a whole class of silent failure: if a future
+llama.cpp links cuFFT or cuSOLVER, a pinned pair would miss it and the backend would fail
+to load with no explanation. That is exactly how the NCCL problem behaved.
+
+The bare `cuda` metapackage is deliberately avoided, since it depends on `nvidia-open` and
+would pull a competing driver onto a machine using a distribution-packaged one.
 
 Those packages come from **NVIDIA's own CUDA apt repository**, which has to be configured
 on the target machine. Debian's `nvidia-cuda-toolkit` is 12.4, which is both too old for
