@@ -120,6 +120,12 @@ jobs:
           key: cuda-13.3.1-ubuntu22.04
           evict-old-files: 7d
 
+      # GGML_CUDA_NCCL defaults to ON and the container ships NCCL, so CMake
+      # would find it and link libnccl.so.2 into the backend. Target machines do
+      # not have NCCL, so the backend would fail to dlopen and ggml would fall
+      # back to CPU without saying why. NCCL only accelerates multi-GPU
+      # collectives, which is marginal for a workstation, so it is turned off
+      # rather than made a dependency.
       - name: Configure
         working-directory: llama.cpp
         run: |
@@ -130,6 +136,7 @@ jobs:
             -DGGML_CPU=OFF \
             -DGGML_CUDA=ON \
             -DGGML_CUDA_CUB_3DOT2=ON \
+            -DGGML_CUDA_NCCL=OFF \
             -DCMAKE_INSTALL_RPATH='$ORIGIN' \
             -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
             -DCMAKE_CUDA_ARCHITECTURES="89-real;120a-real;90-virtual"
@@ -209,17 +216,20 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           TAG: ${{ needs.check.outputs.tag }}
           VERSION: ${{ needs.check.outputs.version }}
         run: |
           ls -la dist
+          # -R is required: this job does not check out the repository, and
+          # without a git remote gh cannot infer which repository to act on.
           # A forced rebuild reuses the upstream tag, and gh refuses to create a
           # release that already exists, so replace it rather than failing.
-          if gh release view "$TAG" >/dev/null 2>&1; then
+          if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
             echo "Replacing the existing release for $TAG"
-            gh release delete "$TAG" --yes --cleanup-tag
+            gh release delete "$TAG" -R "$REPO" --yes --cleanup-tag
           fi
-          gh release create "$TAG" dist/*.deb \
+          gh release create "$TAG" dist/*.deb -R "$REPO" \
             --title "llama.cpp $TAG" \
             --notes "Debian packages built from ggml-org/llama.cpp $TAG (version $VERSION)."
 
