@@ -97,12 +97,25 @@ jobs:
           tar xzf cmake.tar.gz -C /opt/cmake --strip-components=1
           echo "/opt/cmake/bin" >> "$GITHUB_PATH"
 
-      - name: Verify the toolchain and report disk space
+      - name: Verify the toolchain and derive the CUDA package suffix
+        id: toolchain
         run: |
           /opt/cmake/bin/cmake --version
           nvcc --version
           dpkg-deb --version | head -1
           df -h /
+
+          # The CUDA package the backend depends on has to match the toolkit it
+          # was compiled against, so derive it from nvcc rather than repeating
+          # the container tag. NVIDIA's apt names use 13-3, not 13.3.
+          cuda_release=$(nvcc --version | sed -n 's/.*release \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
+          if [ -z "$cuda_release" ]; then
+            echo "::error::could not parse the CUDA release from nvcc --version"
+            exit 1
+          fi
+          suffix=$(printf '%s' "$cuda_release" | tr '.' '-')
+          echo "CUDA release $cuda_release, apt suffix $suffix"
+          echo "cuda_suffix=$suffix" >> "$GITHUB_OUTPUT"
 
       - name: Checkout the packaging scripts
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -165,6 +178,7 @@ jobs:
           TAG: ${{ needs.check.outputs.tag }}
           VERSION: ${{ needs.check.outputs.version }}
           BACKEND: ${{ steps.backend.outputs.path }}
+          CUDA_SUFFIX: ${{ steps.toolchain.outputs.cuda_suffix }}
         run: |
           mkdir -p dist
           for pair in x64:amd64 arm64:arm64; do
@@ -175,7 +189,9 @@ jobs:
               "https://github.com/ggml-org/llama.cpp/releases/download/${TAG}/${archive}"
             scripts/package-base.sh "$archive" "$VERSION" "$debarch" dist
           done
-          scripts/package-cuda.sh "$BACKEND" "$VERSION" dist
+          scripts/package-cuda.sh "$BACKEND" "$VERSION" "$CUDA_SUFFIX" dist
+          echo "--- CUDA package dependencies ---"
+          dpkg-deb -f "dist/llama-cpp-cuda_${VERSION}_amd64.deb" Depends
           ls -la dist
 
       - name: Smoke test the assembled tree

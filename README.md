@@ -18,17 +18,32 @@ Everything installs under `/usr/lib/llama.cpp/`, with tools reached through syml
 
 ## CUDA requirements
 
-`llama-cpp-cuda` declares no CUDA dependency, so it installs anywhere. The backend loads
-only when the machine provides all of the following.
+`llama-cpp-cuda` depends on the CUDA runtime, so apt installs it automatically:
 
-- `libcudart.so.13` and `libcublas.so.13`, from NVIDIA's CUDA apt repository. Debian's own
-  `nvidia-cuda-toolkit` is 12.4 and is too old.
-- An NVIDIA driver of the 580 series or newer, which CUDA 13 requires.
-- A GPU of compute capability 8.9 or 12.0. Other cards fall back to JIT from the shipped
-  9.0 PTX.
+```
+Depends: llama-cpp (= <version>), cuda-cudart-13-3, libcublas-13-3
+```
 
-When any of these is missing, ggml skips the backend and `llama-cpp` runs on CPU. Confirm
-which backend is active with `llama-cli --list-devices`.
+The suffix tracks whichever toolkit the backend was compiled against, derived from `nvcc`
+at build time, so a container bump moves the dependency with it.
+
+Those packages come from **NVIDIA's own CUDA apt repository**, which has to be configured
+on the target machine. Debian's `nvidia-cuda-toolkit` is 12.4, which is both too old for
+compute capability 12.0 and the wrong soname for a CUDA 13 build, so it cannot satisfy
+this. Without NVIDIA's repository, `apt install llama-cpp-cuda` fails with an unsatisfiable
+dependency rather than installing something that cannot work.
+
+Two things are still not expressed as dependencies.
+
+- **The driver.** A 580 series or newer is required, but its package name varies across
+  distributions, so depending on it would break portability for no gain. The GPU is
+  unusable without a driver regardless.
+- **The GPU itself.** Compute capability 8.9 or 12.0 gets native device code. Other cards
+  fall back to JIT from the shipped 9.0 PTX.
+
+Where the driver or a suitable GPU is missing, ggml skips the backend and `llama-cpp` runs
+on CPU. Confirm which backend is active with `llama-cli --list-devices`, and if it reports
+none, `ldd /usr/lib/llama.cpp/libggml-cuda.so | grep 'not found'` names the cause.
 
 ## Building
 
@@ -37,9 +52,11 @@ The workflow runs weekly and can be dispatched manually with a `version` overrid
 
 ```sh
 scripts/package-base.sh <tarball> <version> <arch> <outdir>
-scripts/package-cuda.sh <libggml-cuda.so> <version> <outdir>
-scripts/smoke-test.sh <base.deb> <cuda.deb>
+scripts/package-cuda.sh <libggml-cuda.so> <version> <cuda-suffix> <outdir>
+scripts/smoke-test.sh <base.deb> [cuda.deb]
 ```
+
+`cuda-suffix` is the CUDA release in NVIDIA's apt naming, so 13.3 becomes `13-3`.
 
 Upstream llama.cpp is MIT licensed. Its `LICENSE` ships in the base package at
 `/usr/share/doc/llama-cpp/copyright`.

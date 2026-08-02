@@ -8,6 +8,7 @@ trap 'rm -rf "$work"' EXIT
 
 tag=b10216
 version=0.0.10216
+cuda_suffix=13-3
 fail=0
 
 report() {  # report <label> <expected-status> <actual-status>
@@ -39,7 +40,7 @@ export CUDA_STUB_DIR="$work/gomp/usr/lib/x86_64-linux-gnu"
 
 # A backend that is not even an ELF object must be rejected.
 printf 'not a real library' > "$work/broken.so"
-broken=$("$here/../package-cuda.sh" "$work/broken.so" "$version" "$work")
+broken=$("$here/../package-cuda.sh" "$work/broken.so" "$version" "$cuda_suffix" "$work")
 status=0
 "$here/../smoke-test.sh" "$base" "$broken" >/dev/null 2>&1 || status=$?
 report "a corrupt backend is rejected" 1 "$status"
@@ -64,7 +65,7 @@ report "the base package alone passes" 0 "$status"
 dpkg-deb -x "$base" "$work/basetree"
 mkdir -p "$work/abi"
 cp "$work/basetree/usr/lib/llama.cpp/libggml-cpu-haswell.so" "$work/abi/libggml-cuda.so"
-unresolvable=$("$here/../package-cuda.sh" "$work/abi/libggml-cuda.so" "$version" "$work/abi")
+unresolvable=$("$here/../package-cuda.sh" "$work/abi/libggml-cuda.so" "$version" "$cuda_suffix" "$work/abi")
 
 status=0
 out=$(CUDA_STUB_DIR= "$here/../smoke-test.sh" "$base" "$unresolvable" 2>&1) || status=$?
