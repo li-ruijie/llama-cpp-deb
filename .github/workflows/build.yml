@@ -63,20 +63,99 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-  publish:
+  # Everything that needs the CUDA toolkit happens here, including the smoke
+  # test. The smoke test cannot run on a plain runner: with libcudart and
+  # libcublas absent, every CUDA function shows up as an undefined symbol and
+  # the ABI guard fires on what is really just a missing toolkit. Inside the
+  # container all CUDA libraries resolve, so a remaining undefined symbol means
+  # a genuine disagreement between our compiled backend and upstream's
+  # prebuilt libggml-base.
+  build:
     needs: check
     if: needs.check.outputs.skip == 'false'
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    container: nvidia/cuda:13.3.1-devel-ubuntu22.04
     steps:
-      - name: Checkout
+      - name: Install build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential ccache ca-certificates curl git libssl-dev ninja-build \
+            libgomp1 libssl3 xz-utils
+
+      - name: Install CMake 3.31.12
+        run: |
+          # Ubuntu 22.04 ships CMake 3.22, which rejects a 120a CUDA architecture.
+          # 3.31.12 is inside the range upstream documents as known good.
+          curl -fsSL -o cmake.tar.gz \
+            https://github.com/Kitware/CMake/releases/download/v3.31.12/cmake-3.31.12-linux-x86_64.tar.gz
+          mkdir -p /opt/cmake
+          tar xzf cmake.tar.gz -C /opt/cmake --strip-components=1
+          echo "/opt/cmake/bin" >> "$GITHUB_PATH"
+
+      - name: Verify the toolchain and report disk space
+        run: |
+          /opt/cmake/bin/cmake --version
+          nvcc --version
+          dpkg-deb --version | head -1
+          df -h /
+
+      - name: Checkout the packaging scripts
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Build the base packages
+      - name: Checkout llama.cpp
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ggml-org/llama.cpp
+          ref: ${{ needs.check.outputs.tag }}
+          path: llama.cpp
+
+      - name: ccache
+        uses: ggml-org/ccache-action@1bbbcda0748b3e340dee71a314fa68ffcbd6df79 # v1.2.21
+        with:
+          key: cuda-13.3.1-ubuntu22.04
+          evict-old-files: 7d
+
+      - name: Configure
+        working-directory: llama.cpp
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DGGML_BACKEND_DL=ON \
+            -DGGML_NATIVE=OFF \
+            -DGGML_CPU=OFF \
+            -DGGML_CUDA=ON \
+            -DGGML_CUDA_CUB_3DOT2=ON \
+            -DCMAKE_INSTALL_RPATH='$ORIGIN' \
+            -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+            -DCMAKE_CUDA_ARCHITECTURES="89-real;120a-real;90-virtual"
+
+      - name: Build the CUDA backend
+        working-directory: llama.cpp
+        run: cmake --build build --target ggml-cuda -j "$(nproc)"
+
+      - name: Locate the backend
+        id: backend
+        working-directory: llama.cpp
+        run: |
+          # The output path depends on the generator, so search rather than assume.
+          so=$(find build -name 'libggml-cuda.so' -type f | head -1)
+          if [ -z "$so" ]; then
+            echo "::error::libggml-cuda.so was not produced"
+            find build -name '*.so' -type f
+            exit 1
+          fi
+          ls -la "$so"
+          echo "path=$PWD/$so" >> "$GITHUB_OUTPUT"
+          df -h /
+
+      - name: Build the packages
         env:
           TAG: ${{ needs.check.outputs.tag }}
           VERSION: ${{ needs.check.outputs.version }}
+          BACKEND: ${{ steps.backend.outputs.path }}
         run: |
           mkdir -p dist
           for pair in x64:amd64 arm64:arm64; do
@@ -87,7 +166,43 @@ jobs:
               "https://github.com/ggml-org/llama.cpp/releases/download/${TAG}/${archive}"
             scripts/package-base.sh "$archive" "$VERSION" "$debarch" dist
           done
+          scripts/package-cuda.sh "$BACKEND" "$VERSION" dist
           ls -la dist
+
+      - name: Smoke test the assembled tree
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          # The driver stub is shipped as libcuda.so, but the backend records a
+          # DT_NEEDED on libcuda.so.1, so give it that name. Adding the toolkit
+          # library directory alongside lets libcudart and libcublas resolve, so
+          # any symbol still undefined afterwards is a real ABI fault.
+          mkdir -p /tmp/stubs
+          ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /tmp/stubs/libcuda.so.1
+          export CUDA_STUB_DIR=/tmp/stubs:/usr/local/cuda/lib64
+          scripts/smoke-test.sh \
+            "dist/llama-cpp_${VERSION}_amd64.deb" \
+            "dist/llama-cpp-cuda_${VERSION}_amd64.deb"
+
+      - name: Upload the packages
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: debs
+          path: dist/*.deb
+          if-no-files-found: error
+
+  publish:
+    needs: [check, build]
+    if: needs.check.outputs.skip == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download the packages
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: debs
+          path: dist
 
       - name: Publish the release
         env:
@@ -95,6 +210,7 @@ jobs:
           TAG: ${{ needs.check.outputs.tag }}
           VERSION: ${{ needs.check.outputs.version }}
         run: |
+          ls -la dist
           # A forced rebuild reuses the upstream tag, and gh refuses to create a
           # release that already exists, so replace it rather than failing.
           if gh release view "$TAG" >/dev/null 2>&1; then
