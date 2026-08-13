@@ -36,7 +36,7 @@ and fails the build if any CUDA library outside the declared set appears.
 That check matters because nothing else would catch the drift. Every CUDA library is
 present in the build container, so a newly linked one resolves there and the smoke test
 stays green. It would surface only on a user's machine, as a backend that fails to load
-and a silent fall back to CPU. That is precisely what the NCCL link caused once already.
+and a silent fall back to CPU. That is what the NCCL link caused once already.
 
 The bare `cuda` metapackage is deliberately avoided, since it depends on `nvidia-open` and
 would pull a competing driver onto a machine using a distribution-packaged one.
@@ -47,7 +47,7 @@ compute capability 12.0 and the wrong soname for a CUDA 13 build, so it cannot s
 this. Without NVIDIA's repository, `apt install llama-cpp-cuda` fails with an unsatisfiable
 dependency rather than installing something that cannot work.
 
-Two things are still not expressed as dependencies.
+Two requirements are still not expressed as dependencies.
 
 - **The driver.** A 580 series or newer is required, but its package name varies across
   distributions, so depending on it would break portability for no gain. The GPU is
