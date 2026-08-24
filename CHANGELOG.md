@@ -3,6 +3,12 @@
 ┌────────────┬──────────────────────────────────────────────────────────────────────────────────┐
 │ Date       │ Summary                                                                          │
 ├────────────┼──────────────────────────────────────────────────────────────────────────────────┤
+│ 2026-08-24 │ Upstream split its releases into stable vX.Y.Z and nightly b<N>, and the latest  │
+│            │ endpoint began returning v0.2.0, which ships no binaries, so the archive         │
+│            │ download 404ed after a full CUDA build. The build now resolves the stable tag,   │
+│            │ reads the nightly it names from nightly-tag.txt, and pulls the archives from     │
+│            │ there. Package versions move from 0.0.<build> to the stable version, so          │
+│            │ 0.0.10453 becomes 0.2.0                                                          │
 │ 2026-08-02 │ llama-cpp-cuda 0.0.10223 live for amd64, libggml-cuda.so compiled against CUDA   │
 │            │ 13.3.1 for 89-real, 120a-real, and 90-virtual, 51.8 MB packaged                  │
 │ 2026-08-02 │ Turned GGML_CUDA_NCCL off. It defaults on and the build container ships NCCL, so │

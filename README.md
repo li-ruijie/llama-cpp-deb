@@ -62,16 +62,29 @@ none, `ldd /usr/lib/llama.cpp/libggml-cuda.so | grep 'not found'` names the caus
 ## Building
 
 The workflow runs weekly and can be dispatched manually with a `version` override and a
-`force` flag. The packaging scripts run standalone:
+`force` flag.
+
+Upstream publishes two kinds of release. A `vX.Y.Z` tag marks a stable version and carries
+no binaries, while a `b<N>` tag marks a nightly and carries the prebuilt Ubuntu archives.
+These packages follow the stable line, which is what upstream recommends for downstream
+distribution, so the package version is the stable tag without its leading `v`. Every
+stable release names its matching nightly in a `nightly-tag.txt` asset, and the two are the
+same commit, so the CUDA backend compiled from the stable source agrees with the base
+binaries repackaged from the nightly archive.
+
+The packaging scripts run standalone:
 
 ```sh
+scripts/resolve-upstream.sh <stable-tag> <nightly-tag>
 scripts/package-base.sh <tarball> <version> <arch> <outdir>
 scripts/package-cuda.sh <libggml-cuda.so> <version> <cuda-suffix> <outdir>
 scripts/check-backend-deps.sh <libggml-cuda.so | ->
 scripts/smoke-test.sh <base.deb> [cuda.deb]
 ```
 
-`cuda-suffix` is the CUDA release in NVIDIA's apt naming, so 13.3 becomes `13-3`.
+`resolve-upstream.sh` validates both tags and prints the `tag`, `nightly`, and `version`
+the workflow uses. `cuda-suffix` is the CUDA release in NVIDIA's apt naming, so 13.3
+becomes `13-3`.
 
 Upstream llama.cpp is MIT licensed. Its `LICENSE` ships in the base package at
 `/usr/share/doc/llama-cpp/copyright`.

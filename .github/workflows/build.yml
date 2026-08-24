@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Upstream tag override, for example b10216. Empty means latest."
+        description: "Stable tag override, for example v0.2.0. Empty means latest."
         required: false
         type: string
       force:
@@ -26,10 +26,14 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
+      nightly: ${{ steps.resolve.outputs.nightly }}
       version: ${{ steps.resolve.outputs.version }}
       skip: ${{ steps.resolve.outputs.skip }}
     steps:
-      - name: Resolve the upstream tag and decide whether to build
+      - name: Checkout the packaging scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Resolve the upstream tags and decide whether to build
         id: resolve
         env:
           VERSION_OVERRIDE: ${{ inputs.version }}
@@ -38,30 +42,38 @@ jobs:
         run: |
           set -o pipefail
           if [ -n "$VERSION_OVERRIDE" ]; then
-            TAG="$VERSION_OVERRIDE"
+            STABLE="$VERSION_OVERRIDE"
           else
             # Authenticated, because the anonymous API allows 60 requests an hour
             # per IP and runners share addresses, which returns 403 in practice.
-            TAG=$(gh api repos/ggml-org/llama.cpp/releases/latest --jq '.tag_name')
+            # This yields the newest vX.Y.Z, since upstream marks every b<N>
+            # nightly a prerelease and the latest endpoint skips prereleases.
+            STABLE=$(gh api repos/ggml-org/llama.cpp/releases/latest --jq '.tag_name')
           fi
 
-          # Debian versions must begin with a digit, and upstream tags are b<N>.
-          VERSION="0.0.${TAG#b}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # A stable release ships no binaries, only the tag of the nightly cut
+          # from the same commit, which is where the archives live.
+          NIGHTLY=$(curl -fsSL \
+            "https://github.com/ggml-org/llama.cpp/releases/download/${STABLE}/nightly-tag.txt")
+
+          # Both shapes are validated here, so an upstream scheme change stops the
+          # run in seconds rather than after a full CUDA build.
+          scripts/resolve-upstream.sh "$STABLE" "$NIGHTLY" | tee "$RUNNER_TEMP/resolved"
+          cat "$RUNNER_TEMP/resolved" >> "$GITHUB_OUTPUT"
+          . "$RUNNER_TEMP/resolved"   # sets tag, nightly, and version
 
           DEPLOYED=$(curl -fsSL \
             https://li-ruijie.github.io/apt/dists/stable/dynamic/binary-amd64/Packages 2>/dev/null \
             | awk '/^Package: llama-cpp$/,/^$/' | grep '^Version:' | awk '{print $2}' || true)
 
-          if [ "$VERSION" = "$DEPLOYED" ] && [ "$FORCE" != "true" ]; then
-            echo "Version $VERSION already deployed, skipping"
+          if [ "$version" = "$DEPLOYED" ] && [ "$FORCE" != "true" ]; then
+            echo "Version $version already deployed, skipping"
             echo "skip=true" >> "$GITHUB_OUTPUT"
-          elif [ "$VERSION" = "$DEPLOYED" ]; then
-            echo "Rebuilding $VERSION (forced)"
+          elif [ "$version" = "$DEPLOYED" ]; then
+            echo "Rebuilding $version (forced)"
             echo "skip=false" >> "$GITHUB_OUTPUT"
           else
-            echo "New version $VERSION (deployed: ${DEPLOYED:-none})"
+            echo "New version $version (deployed: ${DEPLOYED:-none})"
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -184,7 +196,7 @@ jobs:
 
       - name: Build the packages
         env:
-          TAG: ${{ needs.check.outputs.tag }}
+          NIGHTLY: ${{ needs.check.outputs.nightly }}
           VERSION: ${{ needs.check.outputs.version }}
           BACKEND: ${{ steps.backend.outputs.path }}
           CUDA_SUFFIX: ${{ steps.toolchain.outputs.cuda_suffix }}
@@ -193,9 +205,9 @@ jobs:
           for pair in x64:amd64 arm64:arm64; do
             upstream="${pair%%:*}"
             debarch="${pair##*:}"
-            archive="llama-${TAG}-bin-ubuntu-${upstream}.tar.gz"
+            archive="llama-${NIGHTLY}-bin-ubuntu-${upstream}.tar.gz"
             curl -fsSL -o "$archive" \
-              "https://github.com/ggml-org/llama.cpp/releases/download/${TAG}/${archive}"
+              "https://github.com/ggml-org/llama.cpp/releases/download/${NIGHTLY}/${archive}"
             scripts/package-base.sh "$archive" "$VERSION" "$debarch" dist
           done
           scripts/package-cuda.sh "$BACKEND" "$VERSION" "$CUDA_SUFFIX" dist
@@ -243,6 +255,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           TAG: ${{ needs.check.outputs.tag }}
+          NIGHTLY: ${{ needs.check.outputs.nightly }}
           VERSION: ${{ needs.check.outputs.version }}
         run: |
           ls -la dist
@@ -256,7 +269,7 @@ jobs:
           fi
           gh release create "$TAG" dist/*.deb -R "$REPO" \
             --title "llama.cpp $TAG" \
-            --notes "Debian packages built from ggml-org/llama.cpp $TAG (version $VERSION)."
+            --notes "Built from ggml-org/llama.cpp $TAG (version $VERSION), binaries from $NIGHTLY."
 
       - name: Dispatch to the APT repository
         env:
