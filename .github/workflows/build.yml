@@ -62,9 +62,14 @@ jobs:
           cat "$RUNNER_TEMP/resolved" >> "$GITHUB_OUTPUT"
           . "$RUNNER_TEMP/resolved"   # sets tag, nightly, and version
 
-          DEPLOYED=$(curl -fsSL \
-            https://apt.leefy.net/dists/stable/dynamic/binary-amd64/Packages 2>/dev/null \
-            | awk '/^Package: llama-cpp$/,/^$/' | grep '^Version:' | awk '{print $2}' || true)
+          # A fetch error fails the job. Read as nothing deployed, it would rebuild and republish
+          # an unchanged version, as whisper-cpp-deb and sd-cpp-deb did on 2026-11-23 while
+          # Cloudflare challenged the runners. A package not yet published still builds.
+          PACKAGES=$(curl -fsSL --retry 3 \
+            https://apt.leefy.net/dists/stable/dynamic/binary-amd64/Packages) \
+            || { echo "::error::Could not read the deployed index from apt.leefy.net"; exit 1; }
+          DEPLOYED=$(printf '%s\n' "$PACKAGES" | awk '/^Package: llama-cpp$/,/^$/' \
+            | awk '/^Version:/ {print $2}')
 
           if [ "$version" = "$DEPLOYED" ] && [ "$FORCE" != "true" ]; then
             echo "Version $version already deployed, skipping"
