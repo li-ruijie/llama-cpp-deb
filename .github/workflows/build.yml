@@ -63,7 +63,7 @@ jobs:
           . "$RUNNER_TEMP/resolved"   # sets tag, nightly, and version
 
           DEPLOYED=$(curl -fsSL \
-            https://li-ruijie.github.io/apt/dists/stable/dynamic/binary-amd64/Packages 2>/dev/null \
+            https://apt.leefy.net/dists/stable/dynamic/binary-amd64/Packages 2>/dev/null \
             | awk '/^Package: llama-cpp$/,/^$/' | grep '^Version:' | awk '{print $2}' || true)
 
           if [ "$version" = "$DEPLOYED" ] && [ "$FORCE" != "true" ]; then

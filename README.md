@@ -1,7 +1,7 @@
 # llama.cpp Debian packages
 
 Builds `llama-cpp` and `llama-cpp-cuda` for the APT repository at
-https://li-ruijie.github.io/apt/. Upstream publishes no Linux CUDA binaries, so the
+https://apt.leefy.net/. Upstream publishes no Linux CUDA binaries, so the
 CUDA backend is compiled here.
 
 ## Packages
