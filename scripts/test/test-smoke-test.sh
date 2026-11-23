@@ -79,13 +79,62 @@ status=0
 out=$("$here/../smoke-test.sh" "$base" "$nolib" 2>&1) || status=$?
 report "a backend missing a library is rejected" 1 "$status"
 contains "the missing-library branch fires" "$out" \
-    "the backend is missing a non-CUDA library"
+    "libggml-cuda.so is missing a library"
 
 nosym=$(broken_cuda 's/ggml_abort/ggml_abxrt/g' "$work/nosym")
 status=0
 out=$("$here/../smoke-test.sh" "$base" "$nosym" 2>&1) || status=$?
 report "a backend with an unresolvable symbol is rejected" 1 "$status"
 contains "the undefined-symbol branch fires" "$out" \
-    "the backend has undefined symbols against the base package"
+    "libggml-cuda.so has undefined symbols against the base package"
+
+# The Vulkan backend, from a matching pair of real upstream archives. The loader
+# is fetched unprivileged like libgomp, so the test does not depend on the host
+# having libvulkan1 installed. It lands in the same directory as libgomp.
+vktag=b12359
+for kind in "" "vulkan-"; do
+    curl -fsSL -o "$work/${kind}vk.tar.gz" \
+        "https://github.com/ggml-org/llama.cpp/releases/download/${vktag}/llama-${vktag}-bin-ubuntu-${kind}x64.tar.gz"
+done
+( cd "$work" && apt-get download libvulkan1 >/dev/null 2>&1 )
+dpkg-deb -x "$work"/libvulkan1_*.deb "$work/gomp"
+
+mkdir -p "$work/vk"
+vkbase=$("$here/../package-base.sh" "$work/vk.tar.gz" 1.0.0 amd64 "$work/vk")
+vulkan=$("$here/../package-vulkan.sh" "$work/vulkan-vk.tar.gz" "$work/vk.tar.gz" 1.0.0 amd64 "$work/vk")
+
+status=0
+out=$("$here/../smoke-test.sh" "$vkbase" "$vulkan" 2>&1) || status=$?
+report "a matching Vulkan backend passes" 0 "$status"
+contains "the Vulkan backend is resolved" "$out" "== resolving libggml-vulkan.so"
+
+# The same two renames, applied to the real Vulkan backend. The Vulkan archive is
+# repacked with the altered library, which package-vulkan.sh still accepts since
+# every file it shares with the CPU archive is unchanged. Nothing may be missing
+# for this backend, so the loader is the library renamed away.
+tar xzf "$work/vulkan-vk.tar.gz" -C "$work"
+vktop="$work/llama-${vktag}"
+
+broken_vulkan() {  # broken_vulkan <perl substitution> <dir>, prints the package path
+    mkdir -p "$2/tree"
+    cp -a "$vktop" "$2/tree/"
+    perl -pe "$1" "$vktop/libggml-vulkan.so" > "$2/tree/llama-${vktag}/libggml-vulkan.so"
+    tar czf "$2/vulkan.tar.gz" -C "$2/tree" "llama-${vktag}"
+    "$here/../package-vulkan.sh" "$2/vulkan.tar.gz" "$work/vk.tar.gz" 1.0.0 amd64 "$2"
+}
+
+nolib=$(broken_vulkan 's/libvulkan\.so\.1/libvulkxn.so.1/g' "$work/vknolib")
+status=0
+out=$("$here/../smoke-test.sh" "$vkbase" "$nolib" 2>&1) || status=$?
+report "a Vulkan backend missing its loader is rejected" 1 "$status"
+contains "the Vulkan missing-library branch fires" "$out" \
+    "libggml-vulkan.so is missing a library"
+
+nosym=$(broken_vulkan 's/ggml_abort/ggml_abxrt/g' "$work/vknosym")
+status=0
+out=$("$here/../smoke-test.sh" "$vkbase" "$nosym" 2>&1) || status=$?
+report "a Vulkan backend with an unresolvable symbol is rejected" 1 "$status"
+contains "the Vulkan undefined-symbol branch fires" "$out" \
+    "libggml-vulkan.so has undefined symbols against the base package"
 
 exit "$fail"
