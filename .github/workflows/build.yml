@@ -102,7 +102,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
             build-essential ccache ca-certificates curl git libssl-dev ninja-build \
-            libgomp1 libssl3 xz-utils
+            libgomp1 libssl3 libvulkan1 xz-utils
 
       - name: Install CMake 3.31.12
         run: |
@@ -214,6 +214,14 @@ jobs:
             curl -fsSL -o "$archive" \
               "https://github.com/ggml-org/llama.cpp/releases/download/${NIGHTLY}/${archive}"
             scripts/package-base.sh "$archive" "$VERSION" "$debarch" dist
+
+            # The Vulkan archive from the same nightly supplies the Vulkan
+            # backend. package-vulkan.sh refuses it unless it matches the CPU
+            # archive in every other file.
+            vkarchive="llama-${NIGHTLY}-bin-ubuntu-vulkan-${upstream}.tar.gz"
+            curl -fsSL -o "$vkarchive" \
+              "https://github.com/ggml-org/llama.cpp/releases/download/${NIGHTLY}/${vkarchive}"
+            scripts/package-vulkan.sh "$vkarchive" "$archive" "$VERSION" "$debarch" dist
           done
           scripts/package-cuda.sh "$BACKEND" "$VERSION" "$CUDA_SUFFIX" dist
           echo "--- CUDA package dependencies ---"
@@ -227,13 +235,15 @@ jobs:
           # The driver stub is shipped as libcuda.so, but the backend records a
           # DT_NEEDED on libcuda.so.1, so give it that name. Adding the toolkit
           # library directory alongside lets libcudart and libcublas resolve, so
-          # any symbol still undefined afterwards is a real ABI fault.
+          # any symbol still undefined afterwards is a real ABI fault. The Vulkan
+          # loader is installed above, so the Vulkan backend must resolve fully.
           mkdir -p /tmp/stubs
           ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /tmp/stubs/libcuda.so.1
           export CUDA_STUB_DIR=/tmp/stubs:/usr/local/cuda/lib64
           scripts/smoke-test.sh \
             "dist/llama-cpp_${VERSION}_amd64.deb" \
-            "dist/llama-cpp-cuda_${VERSION}_amd64.deb"
+            "dist/llama-cpp-cuda_${VERSION}_amd64.deb" \
+            "dist/llama-cpp-vulkan_${VERSION}_amd64.deb"
 
       - name: Upload the packages
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
