@@ -49,6 +49,7 @@ assert_contains "architecture"        "$control" "Architecture: amd64"
 assert_contains "maintainer"          "$control" \
     "Maintainer: li-ruijie <1547237+li-ruijie@users.noreply.github.com>"
 assert_contains "libgomp1 dependency" "$control" "libgomp1"
+assert_contains "amd64 glibc floor"   "$control" "libc6 (>= 2.34)"
 assert_contains "libssl alternation"  "$control" "libssl3t64 | libssl3"
 assert_contains "debian conflict"     "$control" \
     "Conflicts: llama.cpp-tools, llama.cpp-tools-extra"
@@ -69,6 +70,22 @@ assert_equals "licence not left in libdir" \
 # target additionally proves each symlink points into the payload directory.
 assert_equals "one symlink per tool" \
     "$(printf '%s\n' "$contents" | grep -c -- '-> ../lib/llama.cpp/' || true)" "23"
+
+# Upstream builds its arm64 archive on a newer host, and its binaries need
+# GLIBC_2.38 where the x64 ones need 2.34. A synthetic archive is enough here,
+# since only the control field is under test.
+mkdir -p "$work/arm64/llama-${tag}" "$work/arm64-out"
+printf 'licence' > "$work/arm64/llama-${tag}/LICENSE"
+printf 'tool' > "$work/arm64/llama-${tag}/llama-cli"
+tar czf "$work/arm64.tar.gz" -C "$work/arm64" "llama-${tag}"
+arm=$("$here/../package-base.sh" "$work/arm64.tar.gz" "$version" arm64 "$work/arm64-out")
+assert_contains "arm64 glibc floor" "$(dpkg-deb -f "$arm" Depends)" "libc6 (>= 2.38)"
+
+# An architecture without a known floor must be refused rather than guessed.
+status=0
+"$here/../package-base.sh" "$work/arm64.tar.gz" "$version" riscv64 "$work/arm64-out" \
+    >/dev/null 2>&1 || status=$?
+assert_equals "an unknown architecture is rejected" "$status" "2"
 
 # Runtime check. libgomp1 is absent from a clean trixie, so fetch it unprivileged.
 dpkg-deb -x "$deb" "$work/root"

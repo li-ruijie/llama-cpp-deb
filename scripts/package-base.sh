@@ -12,6 +12,17 @@ version=$2
 arch=$3
 outdir=$4
 
+# Upstream builds each architecture on a different host, so the glibc floor of
+# its binaries differs. Measured with objdump -T on the b12359 archives.
+case "$arch" in
+    amd64) glibc=2.34 ;;
+    arm64) glibc=2.38 ;;
+    *)
+        echo "$0: no known glibc floor for architecture '$arch'" >&2
+        exit 2
+        ;;
+esac
+
 staging=$(mktemp -d)
 trap 'rm -rf "$staging"' EXIT
 
@@ -48,7 +59,7 @@ Version: ${version}
 Architecture: ${arch}
 Maintainer: li-ruijie <1547237+li-ruijie@users.noreply.github.com>
 Homepage: https://github.com/ggml-org/llama.cpp
-Depends: libc6 (>= 2.34), libgcc-s1, libgomp1, libstdc++6 (>= 12), libssl3t64 | libssl3
+Depends: libc6 (>= ${glibc}), libgcc-s1, libgomp1, libstdc++6 (>= 12), libssl3t64 | libssl3
 Conflicts: llama.cpp-tools, llama.cpp-tools-extra
 Section: misc
 Priority: optional
