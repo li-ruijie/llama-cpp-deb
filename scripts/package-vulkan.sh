@@ -100,6 +100,10 @@ Description: llama.cpp, Vulkan backend
  The driver is recommended through the vulkan-icd virtual package, which
  mesa-vulkan-drivers and the NVIDIA Vulkan driver both provide. Where no
  driver is present, ggml skips the backend and llama-cpp runs on CPU.
+ .
+ With llama-cpp-cuda also installed, an NVIDIA GPU appears once per backend
+ in llama-cli --list-devices. llama.cpp loads a model onto it once, through
+ CUDA, and skips the Vulkan entry with the same device id.
 EOF
 
 deb="$outdir/llama-cpp-vulkan_${version}_${arch}.deb"

@@ -12,6 +12,7 @@ binaries.
 ├──────────────────┼───────────────┼──────────────────────────────────────────────────┤
 │ llama-cpp        │ amd64, arm64  │ repackaged upstream archive, CPU backends        │
 │ llama-cpp-cuda   │ amd64         │ libggml-cuda.so for CUDA acceleration            │
+│ llama-cpp-vulkan │ amd64, arm64  │ libggml-vulkan.so for Vulkan acceleration        │
 └──────────────────┴───────────────┴──────────────────────────────────────────────────┘
 
 Everything installs under `/usr/lib/llama.cpp/`, with tools reached through symlinks in
@@ -59,6 +60,31 @@ Two requirements are still not expressed as dependencies.
 Where the driver or a suitable GPU is missing, ggml skips the backend and `llama-cpp` runs
 on CPU. Confirm which backend is active with `llama-cli --list-devices`, and if it reports
 none, `ldd /usr/lib/llama.cpp/libggml-cuda.so | grep 'not found'` names the cause.
+
+## Vulkan requirements
+
+`llama-cpp-vulkan` carries `libggml-vulkan.so` from upstream's Vulkan archive, taken from
+the same nightly as the base package. It depends on the Vulkan loader and recommends a
+driver:
+
+```
+Depends: llama-cpp (= <version>), libvulkan1
+Recommends: vulkan-icd
+```
+
+`vulkan-icd` is a virtual package, provided by `mesa-vulkan-drivers` for AMD and Intel GPUs
+and by the NVIDIA Vulkan driver package. Without a driver, ggml skips the backend and
+`llama-cpp` runs on CPU.
+
+`scripts/package-vulkan.sh` refuses to build unless the Vulkan archive is the CPU archive
+plus `libggml-vulkan.so`, with every other file byte-identical, so the backend always
+matches the `libggml-base` that the base package ships. On arm64 both packages need glibc
+2.38, against 2.34 on amd64.
+
+With `llama-cpp-cuda` also installed, `llama-cli --list-devices` lists an NVIDIA GPU twice,
+once per backend. llama.cpp still loads a model onto it once. It skips any GPU whose device
+id matches one already in use, and the CUDA backend registers first, so the card runs
+through CUDA. `--device` selects a backend explicitly.
 
 ## Building
 
